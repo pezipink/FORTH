@@ -1,5 +1,5 @@
 \ some ideas for a game / sim type thing
-
+ 
 : /allot  here over allot swap erase ;
 \ struct creation
 : sfield  ( struct bytes - <name> )  ( adr - adr+n )
