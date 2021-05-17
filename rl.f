@@ -145,11 +145,13 @@ FUNCTION: TCOD_console_flush ( -- )
 FUNCTION: TCOD_console_set_char_background ( con x y r g b flag -- )
 FUNCTION: TCOD_console_set_char_foreground ( con x y r g b -- )
 FUNCTION: TCOD_console_set_char ( con x y c -- )
+LIBRARY SDL2
+FUNCTION: SDL_Delay ( millis -- )
 
 110 110 Z" TEST" 0 1 TCOD_console_init_root
 z" HELLO WORLD" TCOD_console_set_window_title
-0 64 10 0 TCOD_console_set_default_background
-0 0 2 255 TCOD_console_set_default_foreground
+0 0 00 0 TCOD_console_set_default_background
+0 255 255 255 TCOD_console_set_default_foreground
 0 TCOD_console_clear
 TCOD_console_flush
 
@@ -163,6 +165,19 @@ TCOD_console_flush
 
 : set-def-foreground ( colour -- )
 	0 SWAP 0 0 TCOD_console_set_default_foreground ;
+
+: set-char-foreground ( colour x y -- )
+	locals| y x colour |
+	0 x y colour 0 0 TCOD_console_set_char_foreground ;
+
+: set-char-background ( colour x y -- )
+	locals| y x colour |
+	0 x y colour 1 0 0 TCOD_console_set_char_background ;
+
+
+0 0 0 rgb set-def-background
+200 255 255  rgb set-def-foreground
+clearf
 
 : flush TCOD_console_flush ;
 : clear 0 TCOD_console_clear ;
@@ -463,6 +478,179 @@ CELL WIDTH HEIGHT * ra-new CONSTANT map
 
 	ENDCASE
 ;
+
+\ dijkstra algo marks each cell with distance from a starting point.
+\ we know there will be n cells total, so rather than use a queue
+\ we can use an array and pointer.  for each node, collect all other
+\ neighbours (that don't have a distance marked in their cell),
+\ mark them with (current cell distance + 1) then move to the next
+\ item in the list with the pointer.  keep going until all cells 
+\ are visted (the list is fully iterated.)
+
+CELL WIDTH HEIGHT * ra-new CONSTANT dij
+: dij-init ( -- )
+	WIDTH HEIGHT * 0 DO 
+		0 dij ra-append-val
+	LOOP
+	;
+: get-dist ( addr -- ) @ 16 RSHIFT ;
+: set-dist ( value old-value addr -- ) SWAP 16 LSHIFT SWAP ! ;
+variable dij-cur
+variable dij-next-avail
+: dij-enqueue ( addr -- )
+	dij-next-avail @ !
+	CELL dij-next-avail +! ;
+hex
+: clear-weight ( addr -- )
+	DUP @ FFFF AND SWAP !
+;
+: get-weight ( x y -- )
+	map[] F RSHIFT
+;
+
+
+hex
+: clear-weights
+	map RA.Data @
+	map RA.Length @ 0 DO
+		DUP DUP @ FFFF AND SWAP !
+		CELL+
+	LOOP
+	DROP
+;
+decimal
+: clear-dij
+	dij RA.Data @
+	dij RA.Length @ 0 DO
+		DUP 0 SWAP !
+		CELL+
+	LOOP
+	DROP
+;
+
+
+: paint-map ( -- )
+	HEIGHT 0 DO 
+		WIDTH 0 DO
+			255
+			I J map[]						
+			16 RSHIFT - \ DUP
+			0 0 rgb DUP DUP DUP
+			I 2 * 1 + J 2 * 1 +  set-char-background
+			I 2 * 2 + J 2 * 1 +  set-char-background
+			I 2 * 1 + J 2 * 2 +  set-char-background
+			I 2 * 2 + J 2 * 2 +  set-char-background 
+		LOOP
+	LOOP
+	flush
+;
+
+
+variable ani_x
+variable ani_y
+: animate-map ( -- )
+	0 dij RA.Data @
+	dij RA.Length @ 0 DO
+			
+			\ calc x and y from address
+			DUP  \ cnt dij*
+			@    \ dij* map*
+			map ra.data @ - 4 /  \ offset
+			DUP HEIGHT /         \ Y
+			ani_y !
+			WIDTH MOD       \ X
+			ani_x !
+			
+			255
+			ani_x @ ani_y @ map[]						
+			16 RSHIFT - \ DUP
+			0 0 rgb DUP DUP DUP
+			ani_x @ 2 * 1 +  ani_y @ 2 * 1 +  set-char-background
+			ani_x @  2 * 2 + ani_y @ 2 * 1 +  set-char-background
+			ani_x @  2 * 1 + ani_y @ 2 * 2 +  set-char-background
+			ani_x @  2 * 2 + ani_y @ 2 * 2 +  set-char-background
+		 	
+		 	CELL+
+		 	SWAP DUP 5 MOD 0= IF
+		 		flush
+		 	THEN
+		 	1 + 
+		 	SWAP
+		 	
+	LOOP
+	DROP DROP
+	flush
+;
+
+: rerun-dij ( x y -- )
+	clearf
+	clear-weights
+	clear-dij
+	run-dij
+	draw-map
+	\ paint-map
+	animate-map
+;
+ 20 20 rerun-dij
+
+hex
+: run-dij ( x y -- )	
+	map[]* DUP DUP dij RA.Data @ ! \ place as first item in frontier
+	@ FFFF AND 10000 + SWAP !      \ set as distance 1 (0 is special)
+	dij RA.Data @ dij-cur !
+	dij-cur @ CELL+ dij-next-avail !
+	dij RA.Length @ 0 DO
+		\ ." begin loop " I . 
+		dij-cur @ @ @
+		DUP
+		FFFF0000 AND 10000 + >R      \ current distance + 1
+		DUP 1 AND 0<> IF
+			\ west. if no depth, mark with depth +1 and enqueue
+			dij-cur @ @ CELL- DUP 
+			@ FFFF0000 AND 0= IF DUP
+				dij-enqueue DUP 
+				@ R@ OR SWAP ! 
+			ELSE DROP
+			THEN
+		THEN
+		\ ." after west " CR . .S 
+		DUP 2 AND 0<> IF
+			\ east 
+			dij-cur @ @ CELL+ DUP 
+			@ FFFF0000 AND 0= IF DUP
+				dij-enqueue DUP 
+				@ R@ OR SWAP ! 
+			ELSE DROP
+			THEN
+		THEN
+		\ ." after east " CR . .S
+		DUP 4 AND 0<> IF
+			\ south 
+			dij-cur @ @ HEIGHT CELLS + DUP 
+			@ FFFF0000 AND 0= IF DUP
+				dij-enqueue DUP 
+				@ R@ OR SWAP ! 
+			ELSE DROP
+			THEN
+		THEN
+		\ ." after south \n" CR .  .S
+		DUP 8 AND 0<> IF
+			\ north 
+			dij-cur @ @ HEIGHT CELLS - DUP 
+			@ FFFF0000 AND 0= IF DUP
+				dij-enqueue DUP 
+				@ R@ OR SWAP ! 
+			ELSE DROP
+			THEN
+		THEN
+		\ ." before drop \n" CR . .S
+		R> 2DROP
+		\ ." end loop " I . .S 
+		CELL dij-cur +!
+	LOOP
+;
+decimal
+
 
 
 : tlf
