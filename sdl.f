@@ -91,9 +91,9 @@ FFFF CONSTANT SDL_INIT_EVERYTHING
 00000008 CONSTANT SDL_RENDERER_TARGETTEXTURE   \    /**< The renderer supports rendering to texture */
     
 \ texture access enum
-000000001 CONSTANT SDL_TEXTUREACCESS_STATIC    \ /**< Changes rarely, not lockable */
-000000002 CONSTANT SDL_TEXTUREACCESS_STREAMING \ /**< Changes frequently, lockable */
-000000003 CONSTANT SDL_TEXTUREACCESS_TARGET    \ /**< Texture can be used as a render target */
+000000000 CONSTANT SDL_TEXTUREACCESS_STATIC    \ /**< Changes rarely, not lockable */
+000000001 CONSTANT SDL_TEXTUREACCESS_STREAMING \ /**< Changes frequently, lockable */
+000000002 CONSTANT SDL_TEXTUREACCESS_TARGET    \ /**< Texture can be used as a render target */
 
 DECIMAL
 
@@ -170,6 +170,7 @@ variable renderer
 \ window @ -1 SDL_RENDERER_ACCELERATED SDL_CreateRenderer renderer !
  \ window @ -1 SDL_RENDERER_SOFTWARE SDL_CreateRenderer renderer !
  window @ -1 SDL_RENDERER_ACCELERATED SDL_RENDERER_TARGETTEXTURE OR SDL_CreateRenderer renderer !
+\ window @ -1 SDL_RENDERER_SOFTWARE SDL_RENDERER_TARGETTEXTURE OR SDL_CreateRenderer renderer ! 
 CREATE event 128 /allot
 DEFER KeyHandler
 :noname . ; IS KeyHandler
@@ -187,8 +188,8 @@ CREATE my-rect 10 , 10 , 100 , 100 ,
 ;
 
 
-32 CONSTANT HEIGHT
-32 CONSTANT WIDTH
+80 CONSTANT HEIGHT
+80 CONSTANT WIDTH
 
 variable surf
 variable font-tex
@@ -198,18 +199,16 @@ variable console-tex
 z" font.png" IMG_Load surf !
 
 surf @ 1
-    surf @ CELL+ @ 0 0 0 SDL_MapRGB SDL_SetColorKey DROP
+    surf @ CELL+ @ 0 0 0 SDL_MapRGB SDL_SetColorKey THROW
 
 renderer @ surf @ SDL_CreateTextureFromSurface font-tex !
 
 surf @ SDL_FreeSurface
 
-renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET WIDTH HEIGHT SDL_CreateTexture console-tex !
+renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET 1200 1200 SDL_CreateTexture console-tex !
 
 
 
-
-create tex-data 0 , 0 , 0 , 0 ,
 
 : create-rect create , , , , ;
 
@@ -217,22 +216,11 @@ create tex-data 0 , 0 , 0 , 0 ,
 12 12 20 20  create-rect targ-rect
 
 decimal
-: set-char-target ( charcode -- )
-    DUP 16 MOD 12 * char-rect !
-    16 / 12 * char-rect CELL+ !
-;
 
-: set-char ( charcode -- )
-    set-char-target
-    renderer @ SDL_RenderClear drop
-    renderer @ font-tex @ char-rect targ-rect SDL_RenderCopy drop
-    renderer @ SDL_RenderPresent
-
-;
 c0 c0 0 0 create-rec font-rect 
-font-tex @ tex-data tex-data CELL+ tex-data CELL+ CELL+ tex-data CELL+ CELL+ CELL+ SDL_QueryTexture
+\ font-tex @ tex-data tex-data CELL+ tex-data CELL+ CELL+ tex-data CELL+ CELL+ CELL+ SDL_QueryTexture
 
-font-tex @ 255 0 0 SDL_SetTextureColorMod
+\ font-tex @ 255 0 0 SDL_SetTextureColorMod
 
 renderer @ SDL_RenderClear
 \ renderer @ font-tex @ char-rect char-rect SDL_RenderCopy
@@ -294,47 +282,49 @@ DECIMAL
 
 
 : render-console 
-    renderer @ 0 0 0 0 SDL_SetRenderDrawColor DROP
+    renderer @ 0 0 0 0 SDL_SetRenderDrawColor THROW
     renderer @ SDL_RenderClear DROP
-    renderer @ console-tex @ SDL_SetRenderTarget DROP
+
+    renderer @ console-tex @ SDL_SetRenderTarget THROW
     ConsoleBuffer
     WIDTH HEIGHT * 0 DO 
         \ set background and draw filled rect 
         \ dup .
         
         \ only render if this bit is set, in which case clear it
-        \ DUP %ConsoleBufferCell->ForegroundA DUP @ 1 = IF
-        \     0 SWAP !
-
+        DUP %ConsoleBufferCell->ForegroundA DUP @ 1 = IF
+            0 SWAP !
 
             DUP                         
             renderer @ SWAP DUP DUP 
                 %ConsoleBufferCell->BackgroundR @ SWAP
                 %ConsoleBufferCell->BackgroundG @ ROT
-                %ConsoleBufferCell->BackgroundB @ 255 SDL_SetRenderDrawColor DROP
+                %ConsoleBufferCell->BackgroundB @ 255 SDL_SetRenderDrawColor THROW
 
             DUP 
-            renderer @ SWAP %ConsoleBufferCell->DestRect SDL_RenderFillRect DROP
+            renderer @ SWAP %ConsoleBufferCell->DestRect SDL_RenderFillRect THROW
 
             \ set foreground colour mod
             DUP                 
             font-tex @ SWAP DUP DUP 
                 %ConsoleBufferCell->ForegroundR @ SWAP
                 %ConsoleBufferCell->ForegroundG @ ROT
-                %ConsoleBufferCell->ForegroundB @ SDL_SetTextureColorMod DROP
+                %ConsoleBufferCell->ForegroundB @ SDL_SetTextureColorMod THROW
 
             \ blit
             DUP 
             renderer @ SWAP 
             font-tex @ SWAP 
             DUP %ConsoleBufferCell->SourceRect SWAP
-            %ConsoleBufferCell->DestRect SDL_RenderCopy DROP
-        \ ELSE DROP
-        \ THEN
+            %ConsoleBufferCell->DestRect SDL_RenderCopy THROW
+        ELSE DROP
+        THEN
         %ConsoleBufferCell @ +
     LOOP
     DROP
-    renderer @ 0 SDL_SetRenderTarget DROP
+
+    renderer @ 0 SDL_SetRenderTarget THROW
+    renderer @ console-tex @ 0 0 SDL_RenderCopy THROW
     renderer @ SDL_RenderPresent 
 ;
 
@@ -348,6 +338,7 @@ DECIMAL
     DUP %ConsoleBufferCell->ForegroundR rf SWAP !
     DUP %ConsoleBufferCell->ForegroundG gf SWAP !
     DUP %ConsoleBufferCell->ForegroundB bf SWAP !
+    DUP %ConsoleBufferCell->ForegroundA 1 SWAP !
     DUP %ConsoleBufferCell->BackgroundR rb SWAP !
     DUP %ConsoleBufferCell->BackgroundG gb SWAP !
     DUP %ConsoleBufferCell->BackgroundB bb SWAP !
@@ -359,19 +350,23 @@ DECIMAL
     
 ;
 
-255 255 255  255 255 255  0 0 1 set-char2 render-console 
+
+
+\ renderer @ console-tex @ SDL_SetRenderTarget 
+
+\ renderer @ 255 0 0 0 SDL_SetRenderDrawColor THROW
+\ renderer @ SDL_RenderClear DROP
+\ renderer @ SDL_RenderPresent 
+\ renderer @ console-tex @ 0 0 SDL_RenderCopy
+\ renderer @ 0 SDL_SetRenderTarget 
+\ renderer @ SDL_RenderPresent 
+
+
+\ 255 255 255  255 255 255  0 0 1 set-char2 render-console 
 
 hex
 23E8 TASK SDL_PUMP
 decimal
-
-\ VARIABLE (RND)
-\ GetTickCount (rnd) ! \ seed
-
-\ : rnd ( -- n )
-\ (rnd) @ dup 13 lshift xor
-\ dup 17 rshift xor
-\ dup DUP 5 lshift xor (rnd) ! ;
 
 variable fps_frames
 variable fps_current
@@ -419,7 +414,7 @@ CREATE SEED  123475689 ,
         fps_current @ .        
     THEN
 
-    400 0 DO
+    50 0 DO
         256 RND 256 RND 256 RND
         256 RND 256 RND 256 RND
         WIDTH RND HEIGHT RND 128 RND set-char2
