@@ -89,8 +89,33 @@ FFFF CONSTANT SDL_INIT_EVERYTHING
 00000002 CONSTANT SDL_RENDERER_ACCELERATED   \      /**< The renderer uses hardware
 00000004 CONSTANT SDL_RENDERER_PRESENTVSYNC   \     /**< Present is synchronized
 00000008 CONSTANT SDL_RENDERER_TARGETTEXTURE   \    /**< The renderer supports rendering to texture */
-                                                     
+    
+\ texture access enum
+000000001 CONSTANT SDL_TEXTUREACCESS_STATIC    \ /**< Changes rarely, not lockable */
+000000002 CONSTANT SDL_TEXTUREACCESS_STREAMING \ /**< Changes frequently, lockable */
+000000003 CONSTANT SDL_TEXTUREACCESS_TARGET    \ /**< Texture can be used as a render target */
+
 DECIMAL
+
+6 CONSTANT SDL_PIXELTYPE_PACKED32
+4 CONSTANT SDL_PACKEDORDER_RGBA
+6 CONSTANT SDL_PACKEDLAYOUT_8888
+
+1 28 LSHIFT
+SDL_PIXELTYPE_PACKED32 24 LSHIFT OR
+SDL_PACKEDORDER_RGBA 20 LSHIFT OR
+SDL_PACKEDLAYOUT_8888 16 LSHIFT OR
+32 8 LSHIFT OR
+4 OR CONSTANT SDL_PIXELFORMAT_RGBA8888
+
+ \ SDL_PIXELFORMAT_RGBA8888 =
+\        SDL_DEFINE_PIXELFORMAT(SDL_PIXELTYPE_PACKED32, SDL_PACKEDORDER_RGBA,
+\                               SDL_PACKEDLAYOUT_8888, 32, 4),           
+
+\ #define SDL_DEFINE_PIXELFORMAT(type, order, layout, bits, bytes) \
+\     ((1 << 28) | (type << 24) | ((order) << 20) | ((layout) << 16) | \
+\      ((bits) << 8) | ((bytes) << 0))                                          
+
 
 FUNCTION: SDL_Init ( flags -- res )
 FUNCTION: SDL_GetError ( -- char* )
@@ -103,22 +128,26 @@ FUNCTION: SDL_ShowSimpleMessageBox ( flags *title *message *window -- err )
 
 FUNCTION: SDL_GetRenderer ( *window -- renderer* )
 FUNCTION: SDL_CreateRenderer ( *window index flags -- renderer* )
+FUNCTION: SDL_SetRenderTarget ( renderer* texture* -- err )
 FUNCTION: SDL_RenderClear ( renderer* -- err )
 FUNCTION: SDL_RenderPresent ( renderer* -- )
+FUNCTION: SDL_RenderCopy ( ren* tex* srcrect* destrect* -- err )
 FUNCTION: SDL_RenderDrawRect ( renderer* rect* -- err )
 FUNCTION: SDL_RenderFillRect ( renderer* rect* -- err )
-
 FUNCTION: SDL_SetRenderDrawColor ( renderer* r g b a -- err )
-FUNCTION: SDL_PollEvent ( event* -- res ) \ 1 if pending event
 FUNCTION: SDL_SetTextureColorMod ( tex* r g b -- err )
-FUNCTION: SDL_RenderCopy ( ren* tex* srcrect* destrect* -- err )
+
+FUNCTION: SDL_CreateTexture ( ren* piexelFormatEnum access w h -- tex* )
 FUNCTION: SDL_CreateTextureFromSurface ( ren* surf* -- tex* )
+FUNCTION: SDL_QueryTexture ( tex* &format &access &w &h -- err )
 FUNCTION: SDL_FreeSurface ( surface* -- )
 FUNCTION: SDL_DestroyTexture ( tex* -- )
 FUNCTION: SDL_DestroyRenderer ( ren* -- )
+
+FUNCTION: SDL_PollEvent ( event* -- res ) \ 1 if pending event
 FUNCTION: SDL_GetTicks ( -- ticks )
 FUNCTION: SDL_Delay ( ms -- )
-FUNCTION: SDL_QueryTexture ( tex* &format &access &w &h -- err )
+
 FUNCTION: SDL_MapRGB ( pixformat* r g b -- res )
 FUNCTION: SDL_SetColorKey ( surf* flag key -- err )
 
@@ -133,12 +162,14 @@ HEX
     10 LSHIFT OR SWAP
     8 LSHIFT OR OR 
 ;
+
 DECIMAL
 variable window
-z" test" 100 100 600 600 0 SDL_CreateWindow window !
+z" test" 100 100 1200 1200 0 SDL_CreateWindow window !
 variable renderer 
-\window @ -1 SDL_RENDERER_ACCELERATED SDL_CreateRenderer renderer !
-\ window @ -1 SDL_RENDERER_SOFTWARE SDL_CreateRenderer renderer !
+\ window @ -1 SDL_RENDERER_ACCELERATED SDL_CreateRenderer renderer !
+ \ window @ -1 SDL_RENDERER_SOFTWARE SDL_CreateRenderer renderer !
+ window @ -1 SDL_RENDERER_ACCELERATED SDL_RENDERER_TARGETTEXTURE OR SDL_CreateRenderer renderer !
 CREATE event 128 /allot
 DEFER KeyHandler
 :noname . ; IS KeyHandler
@@ -155,8 +186,13 @@ CREATE my-rect 10 , 10 , 100 , 100 ,
 
 ;
 
+
+32 CONSTANT HEIGHT
+32 CONSTANT WIDTH
+
 variable surf
 variable font-tex
+variable console-tex
 
 \ z" font.bmp" IMG_Load surf !
 z" font.png" IMG_Load surf !
@@ -167,6 +203,11 @@ surf @ 1
 renderer @ surf @ SDL_CreateTextureFromSurface font-tex !
 
 surf @ SDL_FreeSurface
+
+renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET WIDTH HEIGHT SDL_CreateTexture console-tex !
+
+
+
 
 create tex-data 0 , 0 , 0 , 0 ,
 
@@ -194,7 +235,7 @@ font-tex @ tex-data tex-data CELL+ tex-data CELL+ CELL+ tex-data CELL+ CELL+ CEL
 font-tex @ 255 0 0 SDL_SetTextureColorMod
 
 renderer @ SDL_RenderClear
-renderer @ font-tex @ char-rect char-rect SDL_RenderCopy
+\ renderer @ font-tex @ char-rect char-rect SDL_RenderCopy
 \ renderer @ font-tex @ font-rect font-rect SDL_RenderCopy
 renderer @ SDL_RenderPresent
 
@@ -217,9 +258,6 @@ struct %ConsoleBufferCell
     %ConsoleBufferCell svar %ConsoleBufferCell->BackgroundA
 
 
-
-40 CONSTANT HEIGHT
-40 CONSTANT WIDTH
 CREATE ConsoleBuffer HEIGHT WIDTH * %ConsoleBufferCell @ * /ALLOT ;
 
 HEX
@@ -240,7 +278,7 @@ HEX
             CELL+ DUP   FF SWAP !  \ foreground r = 24
             CELL+ DUP   18 SWAP !  \ foreground g = 24
             CELL+ DUP   18 SWAP !  \ foreground b = 24
-            CELL+ DUP   0  SWAP !  \ unused alpha
+            CELL+ DUP   1  SWAP !  \ unused alpha (temp: dtermines if needs rendering)
 
             CELL+ DUP   1  SWAP !  \ background r = 0
             CELL+ DUP  E0 SWAP !  \ background g = 224
@@ -258,46 +296,82 @@ DECIMAL
 : render-console 
     renderer @ 0 0 0 0 SDL_SetRenderDrawColor DROP
     renderer @ SDL_RenderClear DROP
-    
+    renderer @ console-tex @ SDL_SetRenderTarget DROP
     ConsoleBuffer
     WIDTH HEIGHT * 0 DO 
         \ set background and draw filled rect 
         \ dup .
         
-        DUP                         
-        renderer @ SWAP DUP DUP 
-            %ConsoleBufferCell->BackgroundR @ SWAP
-            %ConsoleBufferCell->BackgroundG @ ROT
-            %ConsoleBufferCell->BackgroundB @ 255 SDL_SetRenderDrawColor DROP
+        \ only render if this bit is set, in which case clear it
+        \ DUP %ConsoleBufferCell->ForegroundA DUP @ 1 = IF
+        \     0 SWAP !
 
-        DUP 
-        renderer @ SWAP %ConsoleBufferCell->DestRect SDL_RenderFillRect DROP
 
-        \ set foreground colour mod
-        DUP                 
-        font-tex @ SWAP DUP DUP 
-            %ConsoleBufferCell->ForegroundR @ SWAP
-            %ConsoleBufferCell->ForegroundG @ ROT
-            %ConsoleBufferCell->ForegroundB @ SDL_SetTextureColorMod DROP
+            DUP                         
+            renderer @ SWAP DUP DUP 
+                %ConsoleBufferCell->BackgroundR @ SWAP
+                %ConsoleBufferCell->BackgroundG @ ROT
+                %ConsoleBufferCell->BackgroundB @ 255 SDL_SetRenderDrawColor DROP
 
-        \ blit
-        DUP 
-        renderer @ SWAP 
-        font-tex @ SWAP 
-        DUP %ConsoleBufferCell->SourceRect SWAP
-        %ConsoleBufferCell->DestRect SDL_RenderCopy DROP
+            DUP 
+            renderer @ SWAP %ConsoleBufferCell->DestRect SDL_RenderFillRect DROP
 
+            \ set foreground colour mod
+            DUP                 
+            font-tex @ SWAP DUP DUP 
+                %ConsoleBufferCell->ForegroundR @ SWAP
+                %ConsoleBufferCell->ForegroundG @ ROT
+                %ConsoleBufferCell->ForegroundB @ SDL_SetTextureColorMod DROP
+
+            \ blit
+            DUP 
+            renderer @ SWAP 
+            font-tex @ SWAP 
+            DUP %ConsoleBufferCell->SourceRect SWAP
+            %ConsoleBufferCell->DestRect SDL_RenderCopy DROP
+        \ ELSE DROP
+        \ THEN
         %ConsoleBufferCell @ +
     LOOP
     DROP
-
+    renderer @ 0 SDL_SetRenderTarget DROP
     renderer @ SDL_RenderPresent 
 ;
 
+: set-char2 ( rf gf bf rb gb bb x y c ) 
+    locals| c y x bb gb rb bf gf rf |
+
+    x %ConsoleBufferCell @ * 
+    y %ConsoleBufferCell @ * WIDTH * + 
+    ConsoleBuffer +
+
+    DUP %ConsoleBufferCell->ForegroundR rf SWAP !
+    DUP %ConsoleBufferCell->ForegroundG gf SWAP !
+    DUP %ConsoleBufferCell->ForegroundB bf SWAP !
+    DUP %ConsoleBufferCell->BackgroundR rb SWAP !
+    DUP %ConsoleBufferCell->BackgroundG gb SWAP !
+    DUP %ConsoleBufferCell->BackgroundB bb SWAP !
+
+    %ConsoleBufferCell->SourceRect DUP 
+    c 16 MOD 12 * SWAP !
+    c 16 / 12 * SWAP CELL+ !
+
+    
+;
+
+255 255 255  255 255 255  0 0 1 set-char2 render-console 
 
 hex
 23E8 TASK SDL_PUMP
 decimal
+
+\ VARIABLE (RND)
+\ GetTickCount (rnd) ! \ seed
+
+\ : rnd ( -- n )
+\ (rnd) @ dup 13 lshift xor
+\ dup 17 rshift xor
+\ dup DUP 5 lshift xor (rnd) ! ;
 
 variable fps_frames
 variable fps_current
@@ -308,6 +382,33 @@ variable fps_lasttime
 
 DEFER OnFrame
 
+
+     16807 CONSTANT A
+2147483647 CONSTANT M
+    127773 CONSTANT Q   \ m a /
+      2836 CONSTANT R   \ m a mod
+
+CREATE SEED  123475689 ,
+
+\ Returns a full cycle random number
+
+: RANDS ( 'seed -- rand )
+   DUP >R
+   @ Q /MOD ( lo high)
+   R * SWAP A * 2DUP > IF  - ELSE  - M +  THEN  DUP R> ! ;
+
+: RAND ( -- rand )  \ 0 <= rand < ((4,294,967,296/2)-1)
+   SEED RANDS ;
+
+\ Returns single random number less than n
+
+: RND ( n -- rnd )  \ 0 <= rnd < n
+   RAND SWAP MOD ;
+
+: RNDS ( n 'seed -- rnd )
+   RANDS SWAP MOD ;
+
+
 : FPS_Calc 
     1 fps_frames +!
 
@@ -315,8 +416,14 @@ DEFER OnFrame
         SDL_GetTicks fps_lasttime !
         fps_frames @ fps_current !
         0 fps_frames !
-        fps_current @ .
+        fps_current @ .        
     THEN
+
+    400 0 DO
+        256 RND 256 RND 256 RND
+        256 RND 256 RND 256 RND
+        WIDTH RND HEIGHT RND 128 RND set-char2
+    LOOP
 
     render-console
 ;
