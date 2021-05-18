@@ -194,6 +194,7 @@ CREATE my-rect 10 , 10 , 100 , 100 ,
 variable surf
 variable font-tex
 variable console-tex
+variable fx-tex
 
 \ z" font.bmp" IMG_Load surf !
 z" font.png" IMG_Load surf !
@@ -207,6 +208,8 @@ surf @ SDL_FreeSurface
 
 renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET 1200 1200 SDL_CreateTexture console-tex !
 
+renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET 1200 1200 SDL_CreateTexture fx-tex !
+
 
 
 
@@ -214,6 +217,9 @@ renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET 1200 1200 SDL_Creat
 
 12 12 8 0  create-rect char-rect
 12 12 20 20  create-rect targ-rect
+
+100 100 100 100  create-rect fx-rect
+
 
 decimal
 
@@ -351,18 +357,32 @@ DECIMAL
 ;
 
 
+\ fx test
 
-\ renderer @ console-tex @ SDL_SetRenderTarget 
+renderer @ fx-tex @ SDL_SetRenderTarget 
+renderer @ 128 128 128 128 SDL_SetRenderDrawColor THROW
+renderer @ fx-rect SDL_RenderFillRect THROW
+renderer @ 0 SDL_SetRenderTarget 
 
-\ renderer @ 255 0 0 0 SDL_SetRenderDrawColor THROW
-\ renderer @ SDL_RenderClear DROP
-\ renderer @ SDL_RenderPresent 
-\ renderer @ console-tex @ 0 0 SDL_RenderCopy
-\ renderer @ 0 SDL_SetRenderTarget 
-\ renderer @ SDL_RenderPresent 
+renderer @ 0 0 0 0 SDL_SetRenderDrawColor THROW
+renderer @ SDL_RenderClear DROP
+renderer @ fx-tex @ fx-rect fx-rect SDL_RenderCopy
+
+renderer @ SDL_RenderPresent 
 
 
-\ 255 255 255  255 255 255  0 0 1 set-char2 render-console 
+\ console tex test 
+renderer @ console-tex @ SDL_SetRenderTarget 
+
+renderer @ 255 0 0 0 SDL_SetRenderDrawColor THROW
+renderer @ SDL_RenderClear DROP
+renderer @ SDL_RenderPresent 
+renderer @ console-tex @ 0 0 SDL_RenderCopy
+renderer @ 0 SDL_SetRenderTarget 
+renderer @ SDL_RenderPresent 
+
+
+255 255 255  255 255 255  0 0 1 set-char2 render-console 
 
 hex
 23E8 TASK SDL_PUMP
