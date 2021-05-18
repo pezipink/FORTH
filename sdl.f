@@ -16,8 +16,8 @@ struct SDL_RECT
     SDL_RECT svar SDL_RECT.H
     
 struct SDL_POINT
-    SDL_POINT svar SDL_RECT.X
-    SDL_POINT svar SDL_RECT.Y
+    SDL_POINT svar SDL_POINT.X
+    SDL_POINT svar SDL_POINT.Y
     
 struct SDL_CommonEvent
     SDL_CommonEvent svar SDL_CommonEvent.type
@@ -106,6 +106,8 @@ FUNCTION: SDL_CreateRenderer ( *window index flags -- renderer* )
 FUNCTION: SDL_RenderClear ( renderer* -- err )
 FUNCTION: SDL_RenderPresent ( renderer* -- )
 FUNCTION: SDL_RenderDrawRect ( renderer* rect* -- err )
+FUNCTION: SDL_RenderFillRect ( renderer* rect* -- err )
+
 FUNCTION: SDL_SetRenderDrawColor ( renderer* r g b a -- err )
 FUNCTION: SDL_PollEvent ( event* -- res ) \ 1 if pending event
 FUNCTION: SDL_SetTextureColorMod ( tex* r g b -- err )
@@ -114,10 +116,12 @@ FUNCTION: SDL_CreateTextureFromSurface ( ren* surf* -- tex* )
 FUNCTION: SDL_FreeSurface ( surface* -- )
 FUNCTION: SDL_DestroyTexture ( tex* -- )
 FUNCTION: SDL_DestroyRenderer ( ren* -- )
+FUNCTION: SDL_GetTicks ( -- ticks )
 FUNCTION: SDL_Delay ( ms -- )
 FUNCTION: SDL_QueryTexture ( tex* &format &access &w &h -- err )
 FUNCTION: SDL_MapRGB ( pixformat* r g b -- res )
 FUNCTION: SDL_SetColorKey ( surf* flag key -- err )
+
 LIBRARY SDL2_Image
 FUNCTION: IMG_Load ( file* -- surface* )
 
@@ -131,9 +135,10 @@ HEX
 ;
 DECIMAL
 variable window
-z" test" 100 100 200 200 0 SDL_CreateWindow window !
+z" test" 100 100 600 600 0 SDL_CreateWindow window !
 variable renderer 
-window @ -1 SDL_RENDERER_ACCELERATED SDL_CreateRenderer renderer !
+\window @ -1 SDL_RENDERER_ACCELERATED SDL_CreateRenderer renderer !
+\ window @ -1 SDL_RENDERER_SOFTWARE SDL_CreateRenderer renderer !
 CREATE event 128 /allot
 DEFER KeyHandler
 :noname . ; IS KeyHandler
@@ -157,7 +162,7 @@ variable font-tex
 z" font.png" IMG_Load surf !
 
 surf @ 1
-    surf @ CELL+ @ 0 0 0 SDL_MapRGB
+    surf @ CELL+ @ 0 0 0 SDL_MapRGB SDL_SetColorKey DROP
 
 renderer @ surf @ SDL_CreateTextureFromSurface font-tex !
 
@@ -198,51 +203,95 @@ DEFER KeyHandler
 :noname . ; IS KeyHandler
 ' set-char is KeyHandler
 
-110 CONSTANT HEIGHT
-110 CONSTANT WIDTH
-CREATE ConsoleBuffer 110 110 * CELLS /ALLOT ;
-: set-char-fg ( rgb x y )         
-        WIDTH * CELLS SWAP
-        CELLS +
-        DUP
-        ConsoleBuffer + @
-        ROT OR
-        ConsoleBuffer ROT +  !
-;
-: set-char-bg ( rgb x y )         
-        WIDTH * CELLS SWAP
-        CELLS +
-        DUP
-        ConsoleBuffer + @
-        ROT LSHIFT 16 OR
-        ConsoleBuffer ROT +  !
-;
 
-variable ren_x
-variable ren_y
-: split-rgb ( rgb -- r g b )
-    DUP DUP 
-    16 RSHIFT 255 AND
-    -ROT
-    8 RSHIFT 255 AND
-    -ROT
-    255 AND
-    -ROT
+struct %ConsoleBufferCell
+    %ConsoleBufferCell SDL_RECT sembed %ConsoleBufferCell->SourceRect
+    %ConsoleBufferCell SDL_RECT sembed %ConsoleBufferCell->DestRect
+    %ConsoleBufferCell svar %ConsoleBufferCell->ForegroundR
+    %ConsoleBufferCell svar %ConsoleBufferCell->ForegroundG
+    %ConsoleBufferCell svar %ConsoleBufferCell->ForegroundB
+    %ConsoleBufferCell svar %ConsoleBufferCell->ForegroundA
+    %ConsoleBufferCell svar %ConsoleBufferCell->BackgroundR
+    %ConsoleBufferCell svar %ConsoleBufferCell->BackgroundG
+    %ConsoleBufferCell svar %ConsoleBufferCell->BackgroundB
+    %ConsoleBufferCell svar %ConsoleBufferCell->BackgroundA
+
+
+
+40 CONSTANT HEIGHT
+40 CONSTANT WIDTH
+CREATE ConsoleBuffer HEIGHT WIDTH * %ConsoleBufferCell @ * /ALLOT ;
+
+HEX
+: console-init ( -- ) 
+    ConsoleBuffer 
+    HEIGHT 0 DO
+        WIDTH  0 DO
+            DUP         C SWAP !   \ srcrect->x = 0
+            CELL+ DUP   0 SWAP !   \ srcrect->y = 0
+            CELL+ DUP   C SWAP !   \ srcrect->w = 12
+            CELL+ DUP   C SWAP !   \ srcrect->h = 12
+            
+            CELL+ DUP   I C * SWAP !   \ dstrect->x = x * 12
+            CELL+ DUP   J C * SWAP !   \ dstrect->y = y << 4  ( * 16 )
+            CELL+ DUP   C SWAP !   \ dstrect->w = 12
+            CELL+ DUP   C SWAP !   \ dstrect->h = 12
+            
+            CELL+ DUP   FF SWAP !  \ foreground r = 24
+            CELL+ DUP   18 SWAP !  \ foreground g = 24
+            CELL+ DUP   18 SWAP !  \ foreground b = 24
+            CELL+ DUP   0  SWAP !  \ unused alpha
+
+            CELL+ DUP   1  SWAP !  \ background r = 0
+            CELL+ DUP  E0 SWAP !  \ background g = 224
+            CELL+ DUP   3  SWAP !  \ background  b = 0
+            CELL+ DUP   0  SWAP !  \ unused alpha
+            CELL+
+        LOOP
+    LOOP
+    DROP
+
 ;
+DECIMAL
+
 
 : render-console 
-    renderer @ SDL_RenderClear drop
-    0 targ-rect !
-    0 targ-rect CELL+ !
+    renderer @ 0 0 0 0 SDL_SetRenderDrawColor DROP
+    renderer @ SDL_RenderClear DROP
+    
     ConsoleBuffer
-    110 100 * 0 DO 
-        DUP @ DUP
-        \ BG
-        renderer @ swap split-rgb 255 SDL_SetRenderDrawColor
-        \ FG
+    WIDTH HEIGHT * 0 DO 
+        \ set background and draw filled rect 
+        \ dup .
         
+        DUP                         
+        renderer @ SWAP DUP DUP 
+            %ConsoleBufferCell->BackgroundR @ SWAP
+            %ConsoleBufferCell->BackgroundG @ ROT
+            %ConsoleBufferCell->BackgroundB @ 255 SDL_SetRenderDrawColor DROP
 
+        DUP 
+        renderer @ SWAP %ConsoleBufferCell->DestRect SDL_RenderFillRect DROP
+
+        \ set foreground colour mod
+        DUP                 
+        font-tex @ SWAP DUP DUP 
+            %ConsoleBufferCell->ForegroundR @ SWAP
+            %ConsoleBufferCell->ForegroundG @ ROT
+            %ConsoleBufferCell->ForegroundB @ SDL_SetTextureColorMod DROP
+
+        \ blit
+        DUP 
+        renderer @ SWAP 
+        font-tex @ SWAP 
+        DUP %ConsoleBufferCell->SourceRect SWAP
+        %ConsoleBufferCell->DestRect SDL_RenderCopy DROP
+
+        %ConsoleBufferCell @ +
     LOOP
+    DROP
+
+    renderer @ SDL_RenderPresent 
 ;
 
 
@@ -250,11 +299,38 @@ hex
 23E8 TASK SDL_PUMP
 decimal
 
+variable fps_frames
+variable fps_current
+variable fps_lasttime
+0 fps_frames !
+0 fps_current !
+0 fps_lasttime !
+
+DEFER OnFrame
+
+: FPS_Calc 
+    1 fps_frames +!
+
+    fps_lasttime @ SDL_GetTicks 1000 - < IF
+        SDL_GetTicks fps_lasttime !
+        fps_frames @ fps_current !
+        0 fps_frames !
+        fps_current @ .
+    THEN
+
+    render-console
+;
+
+' FPS_Calc IS OnFrame
+
 : start-pump 
     SDL_PUMP ACTIVATE
   BEGIN 
-    10 SDL_Delay
     PAUSE
+    
+  
+    OnFrame
+
     event SDL_PollEvent 
     1 = IF
         event SDL_CommonEvent.type @
