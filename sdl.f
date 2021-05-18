@@ -95,6 +95,23 @@ FFFF CONSTANT SDL_INIT_EVERYTHING
 000000001 CONSTANT SDL_TEXTUREACCESS_STREAMING \ /**< Changes frequently, lockable */
 000000002 CONSTANT SDL_TEXTUREACCESS_TARGET    \ /**< Texture can be used as a render target */
 
+\ blend modes 
+00000000 CONSTANT SDL_BLENDMODE_NONE \     /**< no blending
+                                      \        dstRGBA = srcRGBA */
+00000001 CONSTANT SDL_BLENDMODE_BLEND \    /**< alpha blending
+                                    \       dstRGB = (srcRGB * srcA) + (dstRGB * (1-srcA))
+                                    \      dstA = srcA + (dstA * (1-srcA)) */
+00000002 CONSTANT SDL_BLENDMODE_ADD \      /**< additive blending
+                                        \     dstRGB = (srcRGB * srcA) + dstRGB
+                                        \    dstA = dstA */
+00000004 CONSTANT SDL_BLENDMODE_MOD \      /**< color modulate
+                                        \   dstRGB = srcRGB * dstRGB
+                                        \  dstA = dstA */
+00000008 CONSTANT SDL_BLENDMODE_MUL \      /**< color multiply
+                                        \   dstRGB = (srcRGB * dstRGB) + (dstRGB * (1-srcA))
+                                        \  dstA = (srcA * dstA) + (dstA * (1-srcA)) */
+7FFFFFFF CONSTANT SDL_BLENDMODE_INVALID \
+
 DECIMAL
 
 6 CONSTANT SDL_PIXELTYPE_PACKED32
@@ -136,6 +153,7 @@ FUNCTION: SDL_RenderDrawRect ( renderer* rect* -- err )
 FUNCTION: SDL_RenderFillRect ( renderer* rect* -- err )
 FUNCTION: SDL_SetRenderDrawColor ( renderer* r g b a -- err )
 FUNCTION: SDL_SetTextureColorMod ( tex* r g b -- err )
+FUNCTION: SDL_SetTextureBlendMode ( tex* blendMode -- err )
 
 FUNCTION: SDL_CreateTexture ( ren* piexelFormatEnum access w h -- tex* )
 FUNCTION: SDL_CreateTextureFromSurface ( ren* surf* -- tex* )
@@ -164,8 +182,12 @@ HEX
 ;
 
 DECIMAL
+
+800 CONSTANT WINDOW_WIDTH
+800 CONSTANT WINDOW_HEIGHT
+
 variable window
-z" test" 100 100 1200 1200 0 SDL_CreateWindow window !
+z" test" 100 100 WINDOW_WIDTH WINDOW_HEIGHT SDL_WINDOW_RESIZABLE SDL_CreateWindow window !
 variable renderer 
 \ window @ -1 SDL_RENDERER_ACCELERATED SDL_CreateRenderer renderer !
  \ window @ -1 SDL_RENDERER_SOFTWARE SDL_CreateRenderer renderer !
@@ -188,8 +210,8 @@ CREATE my-rect 10 , 10 , 100 , 100 ,
 ;
 
 
-80 CONSTANT HEIGHT
-80 CONSTANT WIDTH
+40 CONSTANT HEIGHT
+40 CONSTANT WIDTH
 
 variable surf
 variable font-tex
@@ -206,9 +228,9 @@ renderer @ surf @ SDL_CreateTextureFromSurface font-tex !
 
 surf @ SDL_FreeSurface
 
-renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET 1200 1200 SDL_CreateTexture console-tex !
+renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET WINDOW_WIDTH WINDOW_HEIGHT SDL_CreateTexture console-tex !
 
-renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET 1200 1200 SDL_CreateTexture fx-tex !
+renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET WINDOW_WIDTH WINDOW_HEIGHT SDL_CreateTexture fx-tex !
 
 
 
@@ -219,6 +241,7 @@ renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET 1200 1200 SDL_Creat
 12 12 20 20  create-rect targ-rect
 
 100 100 100 100  create-rect fx-rect
+110 120 100 100  create-rect fx-rect2
 
 
 decimal
@@ -269,14 +292,14 @@ HEX
             CELL+ DUP   C SWAP !   \ dstrect->w = 12
             CELL+ DUP   C SWAP !   \ dstrect->h = 12
             
-            CELL+ DUP   FF SWAP !  \ foreground r = 24
-            CELL+ DUP   18 SWAP !  \ foreground g = 24
-            CELL+ DUP   18 SWAP !  \ foreground b = 24
+            CELL+ DUP   80 SWAP !  \ foreground r = 24
+            CELL+ DUP   80 SWAP !  \ foreground g = 24
+            CELL+ DUP   80 SWAP !  \ foreground b = 24
             CELL+ DUP   1  SWAP !  \ unused alpha (temp: dtermines if needs rendering)
 
-            CELL+ DUP   1  SWAP !  \ background r = 0
-            CELL+ DUP  E0 SWAP !  \ background g = 224
-            CELL+ DUP   3  SWAP !  \ background  b = 0
+            CELL+ DUP   0 SWAP !  \ background r = 0
+            CELL+ DUP   0 SWAP !  \ background g = 224
+            CELL+ DUP   0 SWAP !  \ background  b = 0
             CELL+ DUP   0  SWAP !  \ unused alpha
             CELL+
         LOOP
@@ -331,7 +354,7 @@ DECIMAL
 
     renderer @ 0 SDL_SetRenderTarget THROW
     renderer @ console-tex @ 0 0 SDL_RenderCopy THROW
-    renderer @ SDL_RenderPresent 
+    \ renderer @ SDL_RenderPresent 
 ;
 
 : set-char2 ( rf gf bf rb gb bb x y c ) 
@@ -359,14 +382,53 @@ DECIMAL
 
 \ fx test
 
-renderer @ fx-tex @ SDL_SetRenderTarget 
-renderer @ 128 128 128 128 SDL_SetRenderDrawColor THROW
-renderer @ fx-rect SDL_RenderFillRect THROW
-renderer @ 0 SDL_SetRenderTarget 
+variable blend 
+variable blend-step 
+variable blend-dir
+0 blend-step !
+0 blend-dir !
+0 blend !
+: blend-frame
+    blend-step @ 64 = IF
+        0 blend-step !
+        blend @ 128 = blend @ 0= OR IF 
+            blend-dir @ 1 = IF
+                -1 blend-dir !
+            ELSE 
+                1 blend-dir !
+            THEN                                   
+        THEN
+        blend-dir @ blend +!
+        \ blend @ .
+    THEN
+    
+    renderer @ fx-tex @ SDL_SetRenderTarget THROW
+    
+    renderer @ 128 100 32 blend @ SDL_SetRenderDrawColor THROW
+    renderer @ fx-rect SDL_RenderFillRect THROW
 
-renderer @ 0 0 0 0 SDL_SetRenderDrawColor THROW
-renderer @ SDL_RenderClear DROP
-renderer @ fx-tex @ fx-rect fx-rect SDL_RenderCopy
+    renderer @ 32 100 128 blend @ SDL_SetRenderDrawColor THROW
+    renderer @ fx-rect2 SDL_RenderFillRect THROW
+    
+    renderer @ 0 SDL_SetRenderTarget THROW
+    renderer @ fx-tex @ fx-rect fx-rect SDL_RenderCopy THROW
+    renderer @ fx-tex @ fx-rect2 fx-rect2 SDL_RenderCopy THROW
+    1 blend-step +!
+    \ renderer @ SDL_RenderPresent
+;
+
+
+fx-tex @ SDL_BLENDMODE_BLEND SDL_SetTextureBlendMode
+fx-tex @ SDL_BLENDMODE_ADD SDL_SetTextureBlendMode
+
+renderer @ fx-tex @ SDL_SetRenderTarget THROW
+renderer @ 128 64 128 247 SDL_SetRenderDrawColor THROW
+renderer @ fx-rect SDL_RenderFillRect THROW
+renderer @ 0 SDL_SetRenderTarget THROW
+
+\ renderer @ 0 0 0 0 SDL_SetRenderDrawColor THROW
+\ renderer @ SDL_RenderClear DROP
+renderer @ fx-tex @ fx-rect fx-rect SDL_RenderCopy THROW
 
 renderer @ SDL_RenderPresent 
 
@@ -434,13 +496,17 @@ CREATE SEED  123475689 ,
         fps_current @ .        
     THEN
 
-    50 0 DO
-        256 RND 256 RND 256 RND
-        256 RND 256 RND 256 RND
-        WIDTH RND HEIGHT RND 128 RND set-char2
-    LOOP
+    \ 10 SDL_Delay
+
+    \ 50 0 DO
+    \     256 RND 256 RND 256 RND
+    \     256 RND 256 RND 256 RND
+    \     WIDTH RND HEIGHT RND 128 RND set-char2
+    \ LOOP
 
     render-console
+    blend-frame
+    renderer @ SDL_RenderPresent
 ;
 
 ' FPS_Calc IS OnFrame
