@@ -3,6 +3,7 @@
 
 cd c:\repos\forth\ 
 
+include "ds.f"
 include "struct.f"
 
 LIBRARY SDL2
@@ -154,6 +155,7 @@ FUNCTION: SDL_RenderFillRect ( renderer* rect* -- err )
 FUNCTION: SDL_SetRenderDrawColor ( renderer* r g b a -- err )
 FUNCTION: SDL_SetTextureColorMod ( tex* r g b -- err )
 FUNCTION: SDL_SetTextureBlendMode ( tex* blendMode -- err )
+FUNCTION: SDL_SetRenderDrawBlendMode ( renderer* blendMode -- err )
 
 FUNCTION: SDL_CreateTexture ( ren* piexelFormatEnum access w h -- tex* )
 FUNCTION: SDL_CreateTextureFromSurface ( ren* surf* -- tex* )
@@ -183,6 +185,33 @@ HEX
 
 DECIMAL
 
+
+     16807 CONSTANT A
+2147483647 CONSTANT M
+    127773 CONSTANT Q   \ m a /
+      2836 CONSTANT R   \ m a mod
+
+CREATE SEED  123475689 ,
+
+\ Returns a full cycle random number
+
+: RANDS ( 'seed -- rand )
+   DUP >R
+   @ Q /MOD ( lo high)
+   R * SWAP A * 2DUP > IF  - ELSE  - M +  THEN  DUP R> ! ;
+
+: RAND ( -- rand )  \ 0 <= rand < ((4,294,967,296/2)-1)
+   SEED RANDS ;
+
+\ Returns single random number less than n
+
+: RND ( n -- rnd )  \ 0 <= rnd < n
+   RAND SWAP MOD ;
+
+: RNDS ( n 'seed -- rnd )
+   RANDS SWAP MOD ;
+
+
 800 CONSTANT WINDOW_WIDTH
 800 CONSTANT WINDOW_HEIGHT
 
@@ -211,7 +240,7 @@ CREATE my-rect 10 , 10 , 100 , 100 ,
 
 
 40 CONSTANT HEIGHT
-40 CONSTANT WIDTH
+80 CONSTANT WIDTH
 
 variable surf
 variable font-tex
@@ -241,7 +270,8 @@ renderer @ SDL_PIXELFORMAT_RGBA8888 SDL_TEXTUREACCESS_TARGET WINDOW_WIDTH WINDOW
 12 12 20 20  create-rect targ-rect
 
 100 100 100 100  create-rect fx-rect
-110 120 100 100  create-rect fx-rect2
+12 12 0 10  create-rect matrix-rect
+100 100 150 150  create-rect fx-rect2
 
 
 decimal
@@ -292,13 +322,13 @@ HEX
             CELL+ DUP   C SWAP !   \ dstrect->w = 12
             CELL+ DUP   C SWAP !   \ dstrect->h = 12
             
-            CELL+ DUP   80 SWAP !  \ foreground r = 24
-            CELL+ DUP   80 SWAP !  \ foreground g = 24
-            CELL+ DUP   80 SWAP !  \ foreground b = 24
+            CELL+ DUP   0 SWAP !  \ foreground r = 24
+            CELL+ DUP   f0 SWAP !  \ foreground g = 24
+            CELL+ DUP   0 SWAP !  \ foreground b = 24
             CELL+ DUP   1  SWAP !  \ unused alpha (temp: dtermines if needs rendering)
 
             CELL+ DUP   0 SWAP !  \ background r = 0
-            CELL+ DUP   0 SWAP !  \ background g = 224
+            CELL+ DUP   10 SWAP !  \ background g = 224
             CELL+ DUP   0 SWAP !  \ background  b = 0
             CELL+ DUP   0  SWAP !  \ unused alpha
             CELL+
@@ -316,10 +346,7 @@ DECIMAL
 
     renderer @ console-tex @ SDL_SetRenderTarget THROW
     ConsoleBuffer
-    WIDTH HEIGHT * 0 DO 
-        \ set background and draw filled rect 
-        \ dup .
-        
+    WIDTH HEIGHT * 0 DO         
         \ only render if this bit is set, in which case clear it
         DUP %ConsoleBufferCell->ForegroundA DUP @ 1 = IF
             0 SWAP !
@@ -379,6 +406,20 @@ DECIMAL
     
 ;
 
+: set-char-c ( x y c ) 
+    locals| c y x |
+
+    x %ConsoleBufferCell @ * 
+    y %ConsoleBufferCell @ * WIDTH * + 
+    ConsoleBuffer +
+
+    %ConsoleBufferCell->SourceRect DUP 
+    c 16 MOD 12 * SWAP !
+    c 16 / 12 * SWAP CELL+ !
+
+    
+;
+
 
 \ fx test
 
@@ -401,9 +442,14 @@ variable blend-dir
         blend-dir @ blend +!
         \ blend @ .
     THEN
-    
+    renderer @  SDL_BLENDMODE_BLEND SDL_SetRenderDrawBlendMode THROW
+    fx-tex @ SDL_BLENDMODE_BLEND SDL_SetTextureBlendMode
     renderer @ fx-tex @ SDL_SetRenderTarget THROW
-    
+    renderer @ 0 0 0 blend @ SDL_SetRenderDrawColor THROW
+    renderer @ SDL_RenderClear THROW
+
+    blend-dir fx-rect  CELL+ CELL+ +!
+
     renderer @ 128 100 32 blend @ SDL_SetRenderDrawColor THROW
     renderer @ fx-rect SDL_RenderFillRect THROW
 
@@ -417,34 +463,142 @@ variable blend-dir
     \ renderer @ SDL_RenderPresent
 ;
 
+\ let's build a Matrix style animation where we will have a list 
+\ of "head" points that travel down the console.  
+\ they will have the affect of alpha blending themselves and then 
+\ a trail behind them in diminshing intensity.  the head will move
+\ down the screen at a pace determined randomly at creation time.
+\ based on the current stength each cell also has a chance to change
+\ the character at the location. 
 
-fx-tex @ SDL_BLENDMODE_BLEND SDL_SetTextureBlendMode
-fx-tex @ SDL_BLENDMODE_ADD SDL_SetTextureBlendMode
+\ start with the most basic implementation which is a single char with
+\ no trail moving down the screen every x frames. 
 
-renderer @ fx-tex @ SDL_SetRenderTarget THROW
-renderer @ 128 64 128 247 SDL_SetRenderDrawColor THROW
-renderer @ fx-rect SDL_RenderFillRect THROW
-renderer @ 0 SDL_SetRenderTarget THROW
+struct MatrixTrail 
+    MatrixTrail svar MatrixTrail.X  \ character x pos
+    MatrixTrail svar MatrixTrail.Y  \ character y pos
+    MatrixTrail svar MatrixTrail.Counter  \ animation tracker
+    MatrixTrail svar MatrixTrail.Speed    \ frames between movement (higher is slower)
 
-\ renderer @ 0 0 0 0 SDL_SetRenderDrawColor THROW
+CREATE matrix-test 10 , 0 , 0 , 200 ,
+
+variable matrix-ra 
+MatrixTrail @ 25 ra-new matrix-ra !
+
+: init-matrix 
+    25 0 DO  
+        WIDTH RND matrix-test MatrixTrail.X !
+        255 RND matrix-test MatrixTrail.Speed !
+        matrix-test matrix-ra @ ra-append* DROP
+    LOOP
+;
+
+: in-console-bounds-y ( y -- flag ) 
+    DUP 0 >= SWAP HEIGHT < AND ;
+
+: in-console-bounds-x ( x -- flag ) 
+    DUP 0 >= SWAP WIDTH < AND ;
+
+: in-console-bounds ( x y -- flag ) 
+    in-console-bounds-y SWAP
+    in-console-bounds-x AND ;
+
+: matrix-draw-single ( x y intensity -- ) 
+    >R
+    12 * matrix-rect SDL_RECT.Y !
+    12 * matrix-rect SDL_RECT.X !
+    renderer @  0 128 20 R> SDL_SetRenderDrawColor THROW
+    renderer @  matrix-rect SDL_RenderFillRect THROW
+;
+
+: matrix-draw ( matrix* -- ) 
+    \ render target and blend already set.
+    \ draw rect with full intensity
+    DUP DUP MatrixTrail.X @ SWAP MatrixTrail.Y @ 255 matrix-draw-single
+    10 0 DO
+        DUP DUP MatrixTrail.X @ SWAP MatrixTrail.Y @ 1 I + - 255 I 10 * - matrix-draw-single
+    LOOP
+    DROP
+;    
+
+: matrix-draw-all ( -- )    
+    renderer @ SDL_BLENDMODE_BLEND SDL_SetRenderDrawBlendMode THROW
+    fx-tex @ SDL_BLENDMODE_ADD SDL_SetTextureBlendMode THROW
+    renderer @ fx-tex @ SDL_SetRenderTarget THROW
+    renderer @ 0 0 0 0 SDL_SetRenderDrawColor THROW
+    renderer @ SDL_RenderClear THROW
+
+    matrix-ra @ ra.data @
+    matrix-ra @ ra.Length @ 0 DO
+        DUP matrix-draw  
+        MatrixTrail @ + 
+    LOOP
+    DROP
+
+    renderer @ 0 SDL_SetRenderTarget THROW
+    renderer @ fx-tex @ 0 0 SDL_RenderCopy THROW
+;
+
+: matrix-update-counter ( matrix* -- )
+    DUP DUP MatrixTrail.Counter @ SWAP
+    MatrixTrail.Speed @ >= IF 
+        DUP MatrixTrail.Counter 0 SWAP ! 
+        MatrixTrail.Y 1 SWAP +! 
+    ELSE        
+        MatrixTrail.Counter 1 SWAP +!
+    THEN
+;
+
+: matrix-update ( matrix* -- ) 
+    DUP DUP MatrixTrail.X @ SWAP
+    MatrixTrail.Y @ in-console-bounds IF
+        matrix-update-counter
+    ELSE \ remove from ra? not yet supported ;)
+        DUP MatrixTrail.Y 0 SWAP !
+        MatrixTrail.X WIDTH RND SWAP !
+    THEN
+;    
+
+
+: matrix-update-all ( -- )    
+    matrix-ra @ ra.data @
+    matrix-ra @ ra.Length @ 0 DO
+        DUP matrix-update
+        MatrixTrail @ + 
+    LOOP
+    DROP
+;
+
+: flush renderer @ SDL_RenderPresent ;
+
+
+\ \ fx-tex @ SDL_BLENDMODE_BLEND SDL_SetTextureBlendMode
+\ fx-tex @ SDL_BLENDMODE_ADD SDL_SetTextureBlendMode
+
+\ renderer @ fx-tex @ SDL_SetRenderTarget THROW
+\ renderer @ 128 64 128 247 SDL_SetRenderDrawColor THROW
+\ renderer @ fx-rect SDL_RenderFillRect THROW
+\ renderer @ 0 SDL_SetRenderTarget THROW
+
+\ \ renderer @ 0 0 0 0 SDL_SetRenderDrawColor THROW
+\ \ renderer @ SDL_RenderClear DROP
+\ renderer @ fx-tex @ fx-rect fx-rect SDL_RenderCopy THROW
+
+\ renderer @ SDL_RenderPresent 
+
+
+\ \ console tex test 
+\ renderer @ console-tex @ SDL_SetRenderTarget 
+
+\ renderer @ 255 0 0 0 SDL_SetRenderDrawColor THROW
 \ renderer @ SDL_RenderClear DROP
-renderer @ fx-tex @ fx-rect fx-rect SDL_RenderCopy THROW
-
-renderer @ SDL_RenderPresent 
-
-
-\ console tex test 
-renderer @ console-tex @ SDL_SetRenderTarget 
-
-renderer @ 255 0 0 0 SDL_SetRenderDrawColor THROW
-renderer @ SDL_RenderClear DROP
-renderer @ SDL_RenderPresent 
-renderer @ console-tex @ 0 0 SDL_RenderCopy
-renderer @ 0 SDL_SetRenderTarget 
-renderer @ SDL_RenderPresent 
+\ renderer @ SDL_RenderPresent 
+\ renderer @ console-tex @ 0 0 SDL_RenderCopy
+\ renderer @ 0 SDL_SetRenderTarget 
+\ renderer @ SDL_RenderPresent 
 
 
-255 255 255  255 255 255  0 0 1 set-char2 render-console 
+\ 255 255 255  255 255 255  0 0 1 set-char2 render-console 
 
 hex
 23E8 TASK SDL_PUMP
@@ -458,32 +612,6 @@ variable fps_lasttime
 0 fps_lasttime !
 
 DEFER OnFrame
-
-
-     16807 CONSTANT A
-2147483647 CONSTANT M
-    127773 CONSTANT Q   \ m a /
-      2836 CONSTANT R   \ m a mod
-
-CREATE SEED  123475689 ,
-
-\ Returns a full cycle random number
-
-: RANDS ( 'seed -- rand )
-   DUP >R
-   @ Q /MOD ( lo high)
-   R * SWAP A * 2DUP > IF  - ELSE  - M +  THEN  DUP R> ! ;
-
-: RAND ( -- rand )  \ 0 <= rand < ((4,294,967,296/2)-1)
-   SEED RANDS ;
-
-\ Returns single random number less than n
-
-: RND ( n -- rnd )  \ 0 <= rnd < n
-   RAND SWAP MOD ;
-
-: RNDS ( n 'seed -- rnd )
-   RANDS SWAP MOD ;
 
 
 : FPS_Calc 
@@ -505,7 +633,10 @@ CREATE SEED  123475689 ,
     \ LOOP
 
     render-console
-    blend-frame
+    \ blend-frame
+    \ matrix-test matrix-update
+    matrix-update-all
+    matrix-draw-all
     renderer @ SDL_RenderPresent
 ;
 
@@ -539,3 +670,6 @@ CREATE SEED  123475689 ,
   REPEAT  ;
 
 
+console-init
+init-matrix
+start-pump  
