@@ -312,7 +312,7 @@ HEX
     ConsoleBuffer 
     HEIGHT 0 DO
         WIDTH  0 DO
-            DUP         C SWAP !   \ srcrect->x = 0
+            DUP         0 SWAP !   \ srcrect->x = 0
             CELL+ DUP   0 SWAP !   \ srcrect->y = 0
             CELL+ DUP   C SWAP !   \ srcrect->w = 12
             CELL+ DUP   C SWAP !   \ srcrect->h = 12
@@ -412,7 +412,7 @@ DECIMAL
     x %ConsoleBufferCell @ * 
     y %ConsoleBufferCell @ * WIDTH * + 
     ConsoleBuffer +
-
+    DUP %ConsoleBufferCell->ForegroundA 1 SWAP !
     %ConsoleBufferCell->SourceRect DUP 
     c 16 MOD 12 * SWAP !
     c 16 / 12 * SWAP CELL+ !
@@ -486,7 +486,7 @@ variable matrix-ra
 MatrixTrail @ 25 ra-new matrix-ra !
 
 : init-matrix 
-    25 0 DO  
+    45 0 DO  
         WIDTH RND matrix-test MatrixTrail.X !
         255 RND matrix-test MatrixTrail.Speed !
         matrix-test matrix-ra @ ra-append* DROP
@@ -552,7 +552,10 @@ MatrixTrail @ 25 ra-new matrix-ra !
 : matrix-update ( matrix* -- ) 
     DUP DUP MatrixTrail.X @ SWAP
     MatrixTrail.Y @ in-console-bounds IF
-        matrix-update-counter
+        1000 RND 990 > IF             
+            DUP DUP MatrixTrail.X @ SWAP MatrixTrail.Y @ 128 RND set-char-c
+        THEN
+        matrix-update-counter        
     ELSE \ remove from ra? not yet supported ;)
         DUP MatrixTrail.Y 0 SWAP !
         MatrixTrail.X WIDTH RND SWAP !
