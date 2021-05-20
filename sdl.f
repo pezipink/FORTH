@@ -239,7 +239,7 @@
     ;
 
 
-    40 CONSTANT HEIGHT
+    80 CONSTANT HEIGHT
     80 CONSTANT WIDTH
 
     variable surf
@@ -270,6 +270,7 @@
     12 12 20 20  create-rect targ-rect
 
     50 WIDTH 12 * 0 0 create-rect h-bar-rect
+    HEIGHT 12 * 50 0 0 create-rect v-bar-rect
 
     100 100 100 100  create-rect fx-rect
     12 12 0 10  create-rect matrix-rect
@@ -500,12 +501,72 @@
 
 
 
+    variable v-bar-x
+    20 v-bar-x !
+    variable v-bar-count
+    0 v-bar-count !
+    variable v-bar-speed
+    2 v-bar-speed !
+    variable v-bar-dir
+    -1 v-bar-dir !
+
+
+    : draw-v-bar 
+        \ assume renderer setup already
+        \ draw one larger dimmer rect across whole console
+        \ and a thinner, more opaque one inside it
+        \ fx-tex @ SDL_BLENDMODE_ADD SDL_SetTextureBlendMode THROW
+        
+        v-bar-x @ v-bar-rect !  \ set rect x
+        50 v-bar-rect 2 CELLS + !      \ set width
+        
+        renderer @  200 200 200 128 SDL_SetRenderDrawColor THROW
+        renderer @  v-bar-rect SDL_RenderFillRect THROW
+        
+        v-bar-x @ 10 + v-bar-rect !  \ set rect y
+        30 v-bar-rect 2 CELLS + !      \ set width
+        
+        renderer @  200 200 200 150 SDL_SetRenderDrawColor THROW
+        renderer @  v-bar-rect SDL_RenderFillRect THROW
+        
+        v-bar-x @ 20 + v-bar-rect !  \ set rect y
+        10 v-bar-rect 2 CELLS + !      \ set width
+        
+        renderer @  200 200 200 255 SDL_SetRenderDrawColor THROW
+        renderer @  v-bar-rect SDL_RenderFillRect THROW
+        
+        
+    ;
+
+    : flip-v-bar-dir 
+        [ HEX ] 
+        v-bar-dir @ FFFFFFFF XOR 1 + 
+        v-bar-dir ! 
+        [ DECIMAL ] ;
+
+    : move-v-bar 
+        v-bar-x @ v-bar-dir @ + 
+        DUP 12 / in-console-bounds-x IF
+            v-bar-x !
+        ELSE        
+            flip-v-bar-dir
+        THEN ;
+
+    : update-v-bar 
+        1 v-bar-count +!
+        v-bar-count @ v-bar-speed @ = IF
+            0 v-bar-count !
+            move-v-bar 
+        THEN
+    ;
+
+
     variable h-bar-y
     20 h-bar-y !
     variable h-bar-count
     0 h-bar-count !
     variable h-bar-speed
-    20 h-bar-speed !
+    5 h-bar-speed !
     variable h-bar-dir
     -1 h-bar-dir !
 
@@ -514,24 +575,24 @@
         \ assume renderer setup already
         \ draw one larger dimmer rect across whole console
         \ and a thinner, more opaque one inside it
-        
+        fx-tex @ SDL_BLENDMODE_MOD SDL_SetTextureBlendMode THROW
         
         h-bar-y @ h-bar-rect CELL+ !  \ set rect y
         50 h-bar-rect 3 CELLS + !      \ set height
         
-        renderer @  128 20 20 60 SDL_SetRenderDrawColor THROW
+        renderer @  200 200 200 100 SDL_SetRenderDrawColor THROW
         renderer @  h-bar-rect SDL_RenderFillRect THROW
         
         h-bar-y @ 10 + h-bar-rect CELL+ !  \ set rect y
         30 h-bar-rect 3 CELLS + !      \ set height
         
-        renderer @  128 20 20 80 SDL_SetRenderDrawColor THROW
+        renderer @  200 200 200 150 SDL_SetRenderDrawColor THROW
         renderer @  h-bar-rect SDL_RenderFillRect THROW
         
         h-bar-y @ 20 + h-bar-rect CELL+ !  \ set rect y
         10 h-bar-rect 3 CELLS + !      \ set height
         
-        renderer @  128 20 20 100 SDL_SetRenderDrawColor THROW
+        renderer @  200 200 200 255 SDL_SetRenderDrawColor THROW
         renderer @  h-bar-rect SDL_RenderFillRect THROW
         
         
@@ -598,7 +659,11 @@
         LOOP
         DROP
 
+        
+        draw-v-bar
+        
         draw-h-bar 
+
         renderer @ 0 SDL_SetRenderTarget THROW
         renderer @ fx-tex @ 0 0 SDL_RenderCopy THROW
     ;
@@ -616,7 +681,7 @@
     : matrix-update ( matrix* -- ) 
         DUP DUP MatrixTrail.X @ SWAP
         MatrixTrail.Y @ in-console-bounds IF
-            1000 RND 990 > IF             
+            1000 RND 980 > IF             
                 DUP DUP MatrixTrail.X @ SWAP MatrixTrail.Y @ 128 RND set-char-c
             THEN
             matrix-update-counter        
@@ -706,6 +771,7 @@
         \ matrix-test matrix-update
         matrix-update-all
         update-h-bar
+        update-v-bar
         matrix-draw-all
         renderer @ SDL_RenderPresent
     ;
