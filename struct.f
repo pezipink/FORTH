@@ -7,4 +7,5 @@ CELL 2 / CONSTANT HCELL
 : struct variable ;
 : *struct  here swap @ /allot ;
 : sembed  @ sfield ;
+: sizeof  @  ;
 

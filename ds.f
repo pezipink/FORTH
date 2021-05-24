@@ -6,6 +6,7 @@
 : svar cell sfield ;
 : struct variable ;
 : *struct  here swap @ /allot ;
+: sizeof @ ;
 
 
 \ GC
@@ -31,7 +32,7 @@ CREATE GC_STACK 0 , 1024 /ALLOT
 	SWAP CELLS +   \ start address	
 	\ free everything here upwards
 	OVER
-	0 ?DO DUP .S @ FREE THROW CELL+ LOOP DROP
+	0 ?DO DUP @ FREE THROW CELL+ LOOP DROP
 	\ now subtract the gc stack count by that amount
 	GC_STACK @ SWAP - GC_STACK ! ;
 : GALLOC ( n -- addr )
