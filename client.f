@@ -13,7 +13,7 @@ CREATE buffer 64 /ALLOT
 variable ctx 
 zmq_ctx_new ctx ! 
 
-VALUE sock 
+0 VALUE sock 
 
 hex
     23E8 TASK Agent

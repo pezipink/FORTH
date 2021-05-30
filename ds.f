@@ -109,3 +109,13 @@ struct %RA
 	R> RA.Length 1 SWAP +!  \ n-addr
 	;
 
+
+: foreach-preamble 
+    DUP RA.ItemSize @ SWAP
+    DUP RA.Data @ SWAP
+    RA.Length @ 0 ;
+
+\ foreach ... next , over an RA, leaves the current pointer on the stack
+: foreach ( ra-addr -- ) POSTPONE foreach-preamble POSTPONE ?DO POSTPONE DUP ; IMMEDIATE
+: next ( -- ) POSTPONE OVER POSTPONE + POSTPONE LOOP POSTPONE 2DROP ;  IMMEDIATE
+
