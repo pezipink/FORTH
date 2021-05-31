@@ -1,6 +1,125 @@
 cd c:\repos\forth\ 
-include sdl
+
+include zmq
+include struct
 include ds
+include common
+include sdl
+
+
+CREATE msg_type 64 /ALLOT   
+CREATE msg_type_out 64 /ALLOT   
+CREATE msg_payload 64 /ALLOT   
+CREATE msg_payload_out 64 /ALLOT   
+CREATE buffer 64 /ALLOT   
+variable ctx 
+zmq_ctx_new ctx ! 
+
+0 VALUE sock 
+
+hex
+    23E8 TASK Agent
+decimal
+
+
+CREATE identity ," CATBUS"
+ctx @ ZMQ_DEALER zmq_socket TO sock
+sock ZMQ_ROUTING_ID identity identity count nip 1 + zmq_setsockopt 
+sock Z" tcp://127.0.0.1:5561" zmq_connect THROW
+
+CREATE temp-msg  0 , 0 ,
+
+: connect 
+    temp-msg MSG-CONNECT SWAP !
+    sock temp-msg 4 0 zmq_send DROP
+;
+
+: hb
+    temp-msg  MSG-HEARTBEAT SWAP !
+    sock temp-msg 4 0 zmq_send DROP
+;
+
+
+: say ( cstr* u -- )
+    1 + >R
+    msg_payload_out R@ zmq_msg_init_size THROW
+    1 -   \ include len
+    msg_payload_out zmq_msg_data R> CMOVE
+    msg_type_out CELL zmq_msg_init_size THROW
+    MSG-SAY msg_type_out zmq_msg_data !
+    msg_type_out sock ZMQ_SNDMORE zmq_msg_send DROP
+    msg_payload_out sock 0 zmq_msg_send DROP
+    
+;
+
+
+: server-heartbeat 
+   \ ." GOT HB " CR
+;
+
+DEFER HandleSay
+:noname ; IS HandleSay
+
+: server-say 
+  \  ." GOT SAY " CR
+    \ msg_payload zmq_msg_data COUNT TYPE
+    HandleSay
+;
+
+: dispatch-message 
+    msg_type zmq_msg_size 4 = IF
+        msg_type zmq_msg_data @
+        CASE
+            MSG-HEARTBEAT OF server-heartbeat ENDOF
+            MSG-SAY OF server-say ENDOF
+             ." received unknown msg_type "
+        ENDCASE 
+    ELSE
+        ." received malformed or unknown msg_type "
+    THEN ;
+
+
+: read-message
+    \ expect maybe one more message (payload).  
+    \ otherwise, eat messages until no more - bad data
+    msg_payload zmq_msg_init THROW
+    msg_type zmq_msg_more IF
+        msg_payload sock 0 zmq_msg_recv DROP
+    THEN
+
+    \ fail condition - more messages is bad
+    msg_payload zmq_msg_more IF
+        BEGIN
+            msg_payload sock 0 zmq_msg_recv
+        WHILE msg_payload zmq_msg_more REPEAT
+        ." chomped invalid message frame sequence "
+    ELSE
+        dispatch-message
+    THEN
+
+    msg_type zmq_msg_close THROW
+    msg_payload zmq_msg_close THROW
+;
+
+
+: start-agent 
+    Agent ACTIVATE
+    msg_type zmq_msg_init THROW     \ TODO work out exactly what cases we need to close this?
+    BEGIN
+        \ we expect the first mesage to be the socket id    
+        msg_type sock ZMQ_DONTWAIT zmq_msg_recv -1 <> IF        
+            \ ." GOT MSG SIZE " , 
+            \ CR        
+            read-message
+            msg_type zmq_msg_init THROW 
+        THEN
+        PAUSE
+    AGAIN
+;
+
+\ sock @ test-msg test-msg count nip 1 + 0 zmq_send
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\ SDL
 
 
 \ to start with this console will be a standalone app, but later it will be a window that is part of a larger
@@ -95,11 +214,18 @@ CELL 256 ra-new VALUE input_buffer
     THEN
 ;
 
-: push-buffer ( ra-src-addr ) \ copy the contents of the buffer into the current head, and advance head
+: push-buffer ( ra-src-addr -- ) \ copy the contents of the buffer into the current head, and advance head
     ra.data @  text_head @ @ ra.data @  256  MOVE    
     text_head @ @ ra.length 255 SWAP !
 ;
 
+: push-buffer-cstr ( cstr* -- )
+    COUNT 0 DO
+        DUP I + C@ text_head @ @ ra-append-val 
+    LOOP
+    DROP
+    text_head @ @ ra.length 255 SWAP !
+;
 
 12 12 0 0 create-rect char-src-rect
 12 12 0 0 create-rect char-targ-rect
@@ -237,19 +363,41 @@ DEFER TextHandler
 
 
 :noname 
-    DUP ." TH " .
+ \   DUP ." TH " .
     try-append-char    
 ; IS TextHandler
 
+:noname 
+  \  ." IN HANDLE SAY "
+    msg_payload zmq_msg_data 
+        push-buffer-cstr    \ copy input buffer into next slot
+    push-text-tex               \ render the new text, and move the rest up one (losing the top line)
+    advance-head                \ move circular buffer pointer
+    clear-input-buffer 
+; IS HandleSay
+
+CREATE temp_msg 256 /ALLOT 
 :noname 
     DUP
     CASE
         8 OF DROP try-remove-char ENDOF \ backspace
         13 OF DROP                      \ enter
-            input_buffer push-buffer    \ copy input buffer into next slot
-            push-text-tex               \ render the new text, and move the rest up one (losing the top line)
-            advance-head                \ move circular buffer pointer
+            input_buffer RA.Length @ 
+            temp_msg !
+            temp_msg 1 +  locals| x | 
+            input_buffer foreach
+          \      DUP C@ .
+                C@ x C!
+                x 1 + TO x
+            next
+
+            temp_msg COUNT say
             clear-input-buffer 
+            \ input_buffer push-buffer    \ copy input buffer into next slot
+
+            \ push-text-tex               \ render the new text, and move the rest up one (losing the top line)
+            \ advance-head                \ move circular buffer pointer
+            \ clear-input-buffer 
         ENDOF    
         DROP
     ENDCASE
@@ -287,7 +435,7 @@ variable last_frame
                     event SDL_TextInputEvent.text C@ TextHandler
                 ENDOF
                 SDL_TEXTEDITING OF
-                    ." TE " CR                    
+             \       ." TE " CR                    
                 ENDOF
             ENDCASE
         REPEAT        

@@ -70,18 +70,21 @@ struct %RA
 	n *
 	addr RA.Data @ + ;
 
-: ra[] ( ra-addr n )
-	ra[]* @ ;
+: ra[] ( ra-addr n ) ra[]* @ ;
 
-: ra-ensure-capacity ( ra-addr -- ra-addr ) 
-	>R 
-	R@ RA.Length @ R@ RA.Capacity @ = IF 
-		R@ RA.Capacity @ DUP DUP 2 * DUP \ cap cap newcap newcap
-		R@ RA.Capacity ! 				 \ cap cap newcap
-		R> SWAP RESIZE THROW		     \ cap cap addr
-		>R R@ + SWAP ERASE               \ zero latter half of (new) memory
+: ra-ensure-capacity ( ra-addr -- ) 
+	locals| ra |
+	ra RA.Length @ ra RA.Capacity @ 1 - = IF
+		\ calc old and new sizes
+		ra RA.Capacity @ ra RA.ItemSize @ * DUP DUP 2 * \ old-size old-size new-size 
+		\ set new capacity
+		ra RA.Capacity @ 2 * ra RA.Capacity !
+		ra RA.Data @ SWAP RESIZE THROW 					\ olds olds n-addr
+		\ set new pointer into RA.Data
+		DUP ra RA.Data !								\ olds olds n-addr
+		\ zero out new half 
+		+ SWAP ERASE
 	THEN
-	R>
 	;
 
 : ra-next* ( ra-addr )
@@ -92,7 +95,7 @@ struct %RA
 
 : ra-append-val ( data ra-addr -- )
 	\ only for literals / pointers of CELL size RAs	
-	ra-ensure-capacity	
+	DUP ra-ensure-capacity	
 	>R R@	
 	ra-next* !	
 	R> RA.Length 1 SWAP +! ;
@@ -101,7 +104,7 @@ struct %RA
 : ra-append* ( item* ra-addr - new-addr )
 	\ copes ItemSize byets from item* into new location
 	\ return pointer to new item (don't hold this since it might move)	
-	ra-ensure-capacity     
+	DUP ra-ensure-capacity     
 	>R R@
 	ra-next* TUCK           \ n-addr item* n-addr 
 	R@ RA.ItemSize @        \ n-addr item* n-addr size
@@ -118,4 +121,3 @@ struct %RA
 \ foreach ... next , over an RA, leaves the current pointer on the stack
 : foreach ( ra-addr -- ) POSTPONE foreach-preamble POSTPONE ?DO POSTPONE DUP ; IMMEDIATE
 : next ( -- ) POSTPONE OVER POSTPONE + POSTPONE LOOP POSTPONE 2DROP ;  IMMEDIATE
-

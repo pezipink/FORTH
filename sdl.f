@@ -39,6 +39,17 @@ struct SDL_KeyboardEvent
     SDL_KeyboardEvent 1 sfield SDL_KeyboardEvent.padding3
     SDL_KeyboardEvent SDL_Keysym sembed SDL_KeyboardEvent->SDL_Keysym 
 
+struct SDL_TextEditingEvent 
+    SDL_TextEditingEvent SDL_CommonEvent sembed SDL_KeyboardEvent>SDL_CommonEvent
+    SDL_TextEditingEvent svar SDL_TextEditingEvent.windowId
+    SDL_TextEditingEvent 32 sfield SDL_TextEditingEvent.text
+    SDL_TextEditingEvent svar SDL_TextEditingEvent.start
+    SDL_TextEditingEvent svar SDL_TextEditingEvent.length
+
+struct SDL_TextInputEvent 
+    SDL_TextInputEvent SDL_CommonEvent sembed SDL_KeyboardEvent>SDL_CommonEvent
+    SDL_TextInputEvent svar SDL_TextInputEvent.windowId
+    SDL_TextInputEvent 32 sfield SDL_TextInputEvent.text
 
 \ init subsystem flags
 0001 CONSTANT SDL_INIT_TIMER
@@ -55,6 +66,8 @@ FFFF CONSTANT SDL_INIT_EVERYTHING
 
 300 CONSTANT SDL_KEYDOWN
 301 CONSTANT SDL_KEYUP
+302 CONSTANT SDL_TEXTEDITING
+303 CONSTANT SDL_TEXTINPUT
 
 400 CONSTANT SDL_MOUSEMOTION     \ mouse moved
 401 CONSTANT SDL_MOUSEBUTTONDOWN 
@@ -113,6 +126,27 @@ FFFF CONSTANT SDL_INIT_EVERYTHING
                                         \  dstA = (srcA * dstA) + (dstA * (1-srcA)) */
 7FFFFFFF CONSTANT SDL_BLENDMODE_INVALID \
 
+\ KEYMOD patterns
+
+0000 CONSTANT KMOD_NONE
+0001 CONSTANT KMOD_LSHIFT
+0002 CONSTANT KMOD_RSHIFT
+0040 CONSTANT KMOD_LCTRL
+0080 CONSTANT KMOD_RCTRL
+0100 CONSTANT KMOD_LALT
+0200 CONSTANT KMOD_RALT
+0400 CONSTANT KMOD_LGUI
+0800 CONSTANT KMOD_RGUI
+1000 CONSTANT KMOD_NUM
+2000 CONSTANT KMOD_CAPS
+4000 CONSTANT KMOD_MODE
+8000 CONSTANT KMOD_RESERVED
+
+KMOD_LCTRL KMOD_RCTRL OR CONSTANT KMOD_CTRL
+KMOD_LSHIFT KMOD_RSHIFT OR CONSTANT KMOD_SHIFT
+KMOD_LALT KMOD_RALT OR CONSTANT KMOD_ALT
+KMOD_LGUI KMOD_RGUI OR CONSTANT KMOD_GUI
+
 DECIMAL
 
 6 CONSTANT SDL_PIXELTYPE_PACKED32
@@ -161,6 +195,11 @@ FUNCTION: SDL_Delay ( ms -- )
 
 FUNCTION: SDL_MapRGB ( pixformat* r g b -- res )
 FUNCTION: SDL_SetColorKey ( surf* flag key -- err )
+
+FUNCTION: SDL_GetModState ( -- state )
+
+FUNCTION: SDL_StartTextInput ( -- )  \ uses focused sdl window
+FUNCTION: SDL_StopTextInput ( -- )
 
 LIBRARY SDL2_Image
 FUNCTION: IMG_Load ( file* -- surface* )

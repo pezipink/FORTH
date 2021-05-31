@@ -174,7 +174,7 @@ CREATE client-temp 0 , 0 ,
             ." received unknown msg_type "
         ENDCASE 
     ELSE
-        ." received malformed or unknown msg_type "
+        ." received malformed or unknown msg_type. Size : " msg_type zmq_msg_size .
     THEN ;
 
 : read-message
@@ -217,6 +217,7 @@ BEGIN
         msg_id zmq_msg_init THROW 
     THEN
     PAUSE
+    100 ms
 AGAIN
 
 ;
